@@ -78,9 +78,16 @@ if excel_url:
             else:
                 df_clean['Kategori_Remark'] = 'Lainnya'
 
+            # Normalisasi Kolom Remarks+
+            if 'Remarks+' in df_clean.columns:
+                df_clean['Remarks+'] = df_clean['Remarks+'].fillna('Lainnya').astype(str).str.strip()
+            else:
+                df_clean['Remarks+'] = 'Lainnya'
+
             # Sidebar Filters
             st.sidebar.subheader("🔍 Filter Data")
             
+            # Filter Status
             status_list = sorted(df_clean['Status'].astype(str).unique().tolist())
             selected_status = st.sidebar.multiselect(
                 "Filter Status Unit:", 
@@ -88,13 +95,25 @@ if excel_url:
                 default=["Active"] if "Active" in status_list else status_list
             )
 
+            # Filter Customer
             customer_list = sorted(df_clean['Customer'].astype(str).unique().tolist())
             selected_customers = st.sidebar.multiselect("Filter Customer:", customer_list, default=customer_list)
+
+            # Filter Remarks+ (Daftar Opsi Tanpa Carry Over Inactive)
+            all_remarks = sorted(df_clean['Remarks+'].unique().tolist())
+            filtered_remarks_options = [r for r in all_remarks if r != 'Carry Over Subs from 2025 - INACTIVE']
+            
+            selected_remarks = st.sidebar.multiselect(
+                "Filter Kategori Aktivasi (Remarks+):",
+                filtered_remarks_options,
+                default=filtered_remarks_options
+            )
 
             # Filtered DataFrame
             filtered_df = df_clean[
                 (df_clean['Status'].astype(str).isin(selected_status)) &
-                (df_clean['Customer'].astype(str).isin(selected_customers))
+                (df_clean['Customer'].astype(str).isin(selected_customers)) &
+                (df_clean['Remarks+'].isin(selected_remarks))
             ]
 
             # 5. Key Metrics Calculation
@@ -102,7 +121,7 @@ if excel_url:
             total_active_units = len(df_active_overall)
             total_active_customers = df_active_overall['Customer'].nunique()
 
-            # Display Metrics (Native Border Container untuk Dark/Light Mode Fix)
+            # Display Metrics Utama (KPI Cards)
             st.subheader("📊 Key Performance Indicators (KPI)")
             col1, col2, col3, col4 = st.columns(4)
 
@@ -122,6 +141,29 @@ if excel_url:
                 with st.container(border=True):
                     sites_count = filtered_df['Site'].nunique() if 'Site' in filtered_df.columns else 0
                     st.metric(label="📍 Total Site Operational", value=f"{sites_count} Site")
+
+            # -----------------------------------------------------------------
+            # Breakdown Status Aktivasi & Subscription (3 Kolom saja)
+            # -----------------------------------------------------------------
+            st.markdown("##### 🏷️ Breakdown Status Aktivasi & Subscription")
+            
+            c_carry_active = (filtered_df['Remarks+'] == 'Carry Over Subs from 2025 - Active').sum()
+            c_new_act = (filtered_df['Remarks+'] == 'New Activation, of 2026').sum()
+            c_renewal = (filtered_df['Remarks+'] == 'Renewal Subs, of 2026').sum()
+
+            sub_col1, sub_col2, sub_col3 = st.columns(3)
+
+            with sub_col1:
+                with st.container(border=True):
+                    st.metric(label="🟢 Carry Over Subs 2025 (Active)", value=f"{c_carry_active} Unit")
+
+            with sub_col2:
+                with st.container(border=True):
+                    st.metric(label="⚡ New Activation (2026)", value=f"{c_new_act} Unit")
+
+            with sub_col3:
+                with st.container(border=True):
+                    st.metric(label="🔄 Renewal Subs (2026)", value=f"{c_renewal} Unit")
 
             st.markdown("---")
 
@@ -165,10 +207,9 @@ if excel_url:
             st.markdown("---")
 
             # 7. Pivot Summary Table (Jumlah Unit per Customer & Site)
-            st.subheader("📌 Ringkasan Unit Customer Aktif")
+            st.subheader("📌 Ringkasan Unit Customer berdasarkan Site (Pivot)")
             
             if 'Site' in filtered_df.columns:
-                # Membuat Pivot Table berdasarkan Customer & Site
                 pivot_df = pd.pivot_table(
                     filtered_df,
                     index=['Customer', 'Site'],
@@ -178,14 +219,12 @@ if excel_url:
                     fill_value=0
                 ).reset_index()
 
-                # Memastikan kolom Goodwill & Retail tersedia
                 for col in ['Goodwill', 'Retail']:
                     if col not in pivot_df.columns:
                         pivot_df[col] = 0
 
                 pivot_df['Total Unit'] = pivot_df['Goodwill'] + pivot_df['Retail']
                 
-                # Mengganti nilai 0 dengan spasi kosong agar sesuai contoh tampilan Excel
                 pivot_display = pivot_df[['Customer', 'Site', 'Goodwill', 'Retail', 'Total Unit']].copy()
                 
                 st.dataframe(
@@ -196,5 +235,5 @@ if excel_url:
 
             # 8. Data Table Detail Section
             with st.expander("🔍 Lihat Detail Data Mentah"):
-                cols_to_show = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Status', 'Remark'] if c in filtered_df.columns]
+                cols_to_show = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Status', 'Remark', 'Remarks+'] if c in filtered_df.columns]
                 st.dataframe(filtered_df[cols_to_show], use_container_width=True, hide_index=True)
