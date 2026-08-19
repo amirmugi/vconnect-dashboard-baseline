@@ -165,7 +165,7 @@ if excel_url:
             st.markdown("---")
 
             # 7. Pivot Summary Table (Jumlah Unit per Customer & Site)
-            st.subheader("📌 Ringkasan Unit Customer berdasarkan Site (Pivot)")
+            st.subheader("📌 Ringkasan Unit Customer Aktif")
             
             if 'Site' in filtered_df.columns:
                 # Membuat Pivot Table berdasarkan Customer & Site
