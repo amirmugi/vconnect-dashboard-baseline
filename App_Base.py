@@ -200,7 +200,7 @@ if excel_url:
                         )
 
                 if expiring_units > 0:
-                    with st.expander("📌 Lihat Daftar Unit Expiring (< 90 Hari)"):
+                    with st.expander("📌 Lihat Daftar Unit Akan Habis atau Expiring (< 90 Hari)"):
                         exp_show_cols = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Left days', 'Kategori_Remark'] if c in expiring_df.columns]
                         st.dataframe(
                             expiring_df[exp_show_cols].sort_values(by='Left days'),
@@ -250,7 +250,7 @@ if excel_url:
             st.markdown("---")
 
             # 7. Pivot Summary Table (Jumlah Unit per Customer & Site)
-            st.subheader("📌 Ringkasan Unit Customer berdasarkan Site (Pivot)")
+            st.subheader("📌 Ringkasan Unit Customer aktif berdasarkan Site")
             
             if 'Site' in filtered_df.columns:
                 pivot_df = pd.pivot_table(
