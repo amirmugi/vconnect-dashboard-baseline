@@ -12,21 +12,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling CSS
-st.markdown("""
-    <style>
-    .stMetric {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 1px 1px 5px rgba(0,0,0,0.05);
-    }
-    </style>
-""", unsafe_allow_html=True)
-
 DROPBOX_DEFAULT_URL = "https://www.dropbox.com/scl/fi/j1cak1bp9zgpm7besmlmp/Volvo-Connect-Weekly-Monitor.xlsx?rlkey=lcuvedyrhykl95nh4m21ok2ir&e=1&dl=1"
 
-# 2. Fungsi Load Data dari URL
+# 2. Fungsi Load Data
 @st.cache_data(ttl=300)
 def load_data_from_url(url: str):
     if "dropbox.com" in url and "dl=0" in url:
@@ -71,12 +59,11 @@ if excel_url:
 
         if missing_cols:
             st.error(f"⚠️ Kolom berikut tidak ditemukan pada Excel: **{', '.join(missing_cols)}**.")
-            st.write("Kolom yang terdeteksi di Excel:", df_raw.columns.tolist())
         else:
-            # Cleaning Data
+            # Data Cleaning
             df_clean = df_raw.dropna(subset=['Customer', 'Status']).copy()
 
-            # Standarisasi Kolom Remark untuk Kategori Retail vs Goodwill
+            # Pengelompokan Kategori Remark (Goodwill vs Retail)
             if 'Remark' in df_clean.columns:
                 def categorize_remark(val):
                     val_str = str(val).strip().upper()
@@ -115,36 +102,26 @@ if excel_url:
             total_active_units = len(df_active_overall)
             total_active_customers = df_active_overall['Customer'].nunique()
 
-            # Display Metrics
+            # Display Metrics (Native Border Container untuk Dark/Light Mode Fix)
             st.subheader("📊 Key Performance Indicators (KPI)")
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
-                st.metric(
-                    label="🟢 Total Unit Aktif",
-                    value=f"{total_active_units:,} Unit",
-                    help="Total unit dengan status Active di database"
-                )
+                with st.container(border=True):
+                    st.metric(label="🟢 Total Unit Aktif", value=f"{total_active_units:,} Unit")
 
             with col2:
-                st.metric(
-                    label="🏢 Total Customer Aktif",
-                    value=f"{total_active_customers} Customer",
-                    help="Total customer unik yang memiliki unit Active"
-                )
+                with st.container(border=True):
+                    st.metric(label="🏢 Customer Aktif", value=f"{total_active_customers} Customer")
 
             with col3:
-                st.metric(
-                    label="🚛 Unit Terfilter",
-                    value=f"{len(filtered_df):,} Unit"
-                )
+                with st.container(border=True):
+                    st.metric(label="🚛 Unit Terfilter", value=f"{len(filtered_df):,} Unit")
 
             with col4:
-                sites_count = filtered_df['Site'].nunique() if 'Site' in filtered_df.columns else 0
-                st.metric(
-                    label="📍 Total Site Operational",
-                    value=f"{sites_count} Site"
-                )
+                with st.container(border=True):
+                    sites_count = filtered_df['Site'].nunique() if 'Site' in filtered_df.columns else 0
+                    st.metric(label="📍 Total Site Operational", value=f"{sites_count} Site")
 
             st.markdown("---")
 
@@ -170,14 +147,9 @@ if excel_url:
 
             with col_right:
                 st.subheader("🧩 Komposisi Tipe (Retail vs Goodwill)")
-                # Mengambil komposisi berdasarkan kategori Retail dan Goodwill
                 type_counts = filtered_df['Kategori_Remark'].value_counts().reset_index()
                 type_counts.columns = ['Tipe', 'Total']
-
-                # Filter khusus agar berfokus pada Retail dan Goodwill
                 type_counts = type_counts[type_counts['Tipe'].isin(['Retail', 'Goodwill'])]
-
-                color_map = {'Retail': '#0068c9', 'Goodwill': '#ff2b2b'}
 
                 fig_status = px.pie(
                     type_counts,
@@ -185,16 +157,44 @@ if excel_url:
                     values='Total',
                     hole=0.4,
                     color='Tipe',
-                    color_discrete_map=color_map
+                    color_discrete_map={'Retail': '#0068c9', 'Goodwill': '#ff2b2b'}
                 )
                 fig_status.update_traces(textposition='inside', textinfo='percent+label+value')
                 st.plotly_chart(fig_status, use_container_width=True)
 
-            # 7. Data Table Section
-            st.subheader("📋 Detail Data Unit")
-            cols_to_show = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Status', 'Remark'] if c in filtered_df.columns]
-            st.dataframe(
-                filtered_df[cols_to_show],
-                use_container_width=True,
-                hide_index=True
-            )
+            st.markdown("---")
+
+            # 7. Pivot Summary Table (Jumlah Unit per Customer & Site)
+            st.subheader("📌 Ringkasan Unit Customer berdasarkan Site (Pivot)")
+            
+            if 'Site' in filtered_df.columns:
+                # Membuat Pivot Table berdasarkan Customer & Site
+                pivot_df = pd.pivot_table(
+                    filtered_df,
+                    index=['Customer', 'Site'],
+                    columns='Kategori_Remark',
+                    values='Chassis ID' if 'Chassis ID' in filtered_df.columns else 'Status',
+                    aggfunc='count',
+                    fill_value=0
+                ).reset_index()
+
+                # Memastikan kolom Goodwill & Retail tersedia
+                for col in ['Goodwill', 'Retail']:
+                    if col not in pivot_df.columns:
+                        pivot_df[col] = 0
+
+                pivot_df['Total Unit'] = pivot_df['Goodwill'] + pivot_df['Retail']
+                
+                # Mengganti nilai 0 dengan spasi kosong agar sesuai contoh tampilan Excel
+                pivot_display = pivot_df[['Customer', 'Site', 'Goodwill', 'Retail', 'Total Unit']].copy()
+                
+                st.dataframe(
+                    pivot_display,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            # 8. Data Table Detail Section
+            with st.expander("🔍 Lihat Detail Data Mentah"):
+                cols_to_show = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Status', 'Remark'] if c in filtered_df.columns]
+                st.dataframe(filtered_df[cols_to_show], use_container_width=True, hide_index=True)
