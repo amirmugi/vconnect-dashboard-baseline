@@ -84,6 +84,12 @@ if excel_url:
             else:
                 df_clean['Remarks+'] = 'Lainnya'
 
+            # Konversi Kolom Left days ke Numerik
+            if 'Left days' in df_clean.columns:
+                df_clean['Left_days_num'] = pd.to_numeric(df_clean['Left days'], errors='coerce')
+            else:
+                df_clean['Left_days_num'] = None
+
             # Sidebar Filters
             st.sidebar.subheader("🔍 Filter Data")
             
@@ -99,7 +105,7 @@ if excel_url:
             customer_list = sorted(df_clean['Customer'].astype(str).unique().tolist())
             selected_customers = st.sidebar.multiselect("Filter Customer:", customer_list, default=customer_list)
 
-            # Filter Remarks+ (Daftar Opsi Tanpa Carry Over Inactive)
+            # Filter Remarks+
             all_remarks = sorted(df_clean['Remarks+'].unique().tolist())
             filtered_remarks_options = [r for r in all_remarks if r != 'Carry Over Subs from 2025 - INACTIVE']
             
@@ -121,49 +127,86 @@ if excel_url:
             total_active_units = len(df_active_overall)
             total_active_customers = df_active_overall['Customer'].nunique()
 
-            # Display Metrics Utama (KPI Cards)
+            # -----------------------------------------------------------------
+            # BARIS 1 KPI (Proporsional 3 Kolom Atas)
+            # -----------------------------------------------------------------
             st.subheader("📊 Key Performance Indicators (KPI)")
-            col1, col2, col3, col4 = st.columns(4)
+            top_col1, top_col2, top_col3 = st.columns(3)
 
-            with col1:
+            with top_col1:
                 with st.container(border=True):
-                    st.metric(label="🟢 Total Unit Aktif", value=f"{total_active_units:,} Unit")
+                    st.metric(
+                        label="🟢 Total Unit Aktif", 
+                        value=f"{len(filtered_df):,} Unit",
+                        help="Jumlah unit terfilter saat ini"
+                    )
 
-            with col2:
+            with top_col2:
                 with st.container(border=True):
-                    st.metric(label="🏢 Customer Aktif", value=f"{total_active_customers} Customer")
+                    cust_filtered_count = filtered_df['Customer'].nunique()
+                    st.metric(label="🏢 Customer Aktif", value=f"{cust_filtered_count} Customer")
 
-            with col3:
-                with st.container(border=True):
-                    st.metric(label="🚛 Unit Terfilter", value=f"{len(filtered_df):,} Unit")
-
-            with col4:
+            with top_col3:
                 with st.container(border=True):
                     sites_count = filtered_df['Site'].nunique() if 'Site' in filtered_df.columns else 0
                     st.metric(label="📍 Total Site Operational", value=f"{sites_count} Site")
 
             # -----------------------------------------------------------------
-            # Breakdown Status Aktivasi & Subscription (3 Kolom saja)
+            # BARIS 2 KPI (Proporsional 3 Kolom Bawah)
             # -----------------------------------------------------------------
-            st.markdown("##### 🏷️ Breakdown Status Aktivasi & Subscription")
-            
             c_carry_active = (filtered_df['Remarks+'] == 'Carry Over Subs from 2025 - Active').sum()
             c_new_act = (filtered_df['Remarks+'] == 'New Activation, of 2026').sum()
             c_renewal = (filtered_df['Remarks+'] == 'Renewal Subs, of 2026').sum()
 
-            sub_col1, sub_col2, sub_col3 = st.columns(3)
+            bot_col1, bot_col2, bot_col3 = st.columns(3)
 
-            with sub_col1:
+            with bot_col1:
                 with st.container(border=True):
                     st.metric(label="🟢 Carry Over Subs 2025 (Active)", value=f"{c_carry_active} Unit")
 
-            with sub_col2:
+            with bot_col2:
                 with st.container(border=True):
                     st.metric(label="⚡ New Activation (2026)", value=f"{c_new_act} Unit")
 
-            with sub_col3:
+            with bot_col3:
                 with st.container(border=True):
                     st.metric(label="🔄 Renewal Subs (2026)", value=f"{c_renewal} Unit")
+
+            # -----------------------------------------------------------------
+            # PERINGATAN EXPIRING UNITS (< 90 HARI)
+            # -----------------------------------------------------------------
+            if 'Left_days_num' in filtered_df.columns:
+                # Mengambil unit yang sisa harinya <= 90 dan masih >= 0
+                expiring_df = filtered_df[(filtered_df['Left_days_num'] <= 90) & (filtered_df['Left_days_num'] >= 0)]
+                expiring_units = len(expiring_df)
+                expiring_cust = expiring_df['Customer'].nunique()
+
+                st.markdown("##### ⚠️ Warning: Unit Masa Kontrak Segera Habis (< 90 Hari)")
+                exp_col1, exp_col2 = st.columns(2)
+
+                with exp_col1:
+                    with st.container(border=True):
+                        st.metric(
+                            label="⏳ Unit Expiring (< 90 Hari)", 
+                            value=f"{expiring_units} Unit",
+                            help="Jumlah unit terfilter dengan Left days <= 90 hari"
+                        )
+
+                with exp_col2:
+                    with st.container(border=True):
+                        st.metric(
+                            label="🏢 Customer Terdampak (< 90 Hari)", 
+                            value=f"{expiring_cust} Customer"
+                        )
+
+                if expiring_units > 0:
+                    with st.expander("📌 Lihat Daftar Unit Expiring (< 90 Hari)"):
+                        exp_show_cols = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Left days', 'Kategori_Remark'] if c in expiring_df.columns]
+                        st.dataframe(
+                            expiring_df[exp_show_cols].sort_values(by='Left days'),
+                            use_container_width=True,
+                            hide_index=True
+                        )
 
             st.markdown("---")
 
@@ -235,5 +278,5 @@ if excel_url:
 
             # 8. Data Table Detail Section
             with st.expander("🔍 Lihat Detail Data Mentah"):
-                cols_to_show = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Status', 'Remark', 'Remarks+'] if c in filtered_df.columns]
+                cols_to_show = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Status', 'Left days', 'Remark', 'Remarks+'] if c in filtered_df.columns]
                 st.dataframe(filtered_df[cols_to_show], use_container_width=True, hide_index=True)
