@@ -12,12 +12,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Custom Styling CSS
+st.markdown("""
+    <style>
+    .stMetric {
+        background-color: #f8f9fa;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 1px 1px 5px rgba(0,0,0,0.05);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 DROPBOX_DEFAULT_URL = "https://www.dropbox.com/scl/fi/j1cak1bp9zgpm7besmlmp/Volvo-Connect-Weekly-Monitor.xlsx?rlkey=lcuvedyrhykl95nh4m21ok2ir&e=1&dl=1"
 
-# 2. Fungsi Load Data (Diperbaiki: header=0)
+# 2. Fungsi Load Data dari URL
 @st.cache_data(ttl=300)
 def load_data_from_url(url: str):
-    # Format URL Dropbox agar langsung mengunduh
     if "dropbox.com" in url and "dl=0" in url:
         url = url.replace("dl=0", "dl=1")
     elif "dropbox.com" in url and "dl=1" not in url:
@@ -31,11 +42,7 @@ def load_data_from_url(url: str):
         response = requests.get(url, headers=headers, timeout=20)
         if response.status_code == 200:
             file_bytes = io.BytesIO(response.content)
-            
-            # REVISI: Gunakan header=0 agar baris pertama dibaca sebagai nama kolom
             df = pd.read_excel(file_bytes, sheet_name='List Volvo Connect', header=0)
-            
-            # Bersihkan spasi berlebih pada nama kolom
             df.columns = df.columns.astype(str).str.strip()
             return df
         else:
@@ -59,7 +66,6 @@ if excel_url:
         df_raw = load_data_from_url(excel_url)
 
     if df_raw is not None:
-        # Validasi Keberadaan Kolom Wajib
         required_cols = ['Customer', 'Status']
         missing_cols = [col for col in required_cols if col not in df_raw.columns]
 
@@ -70,11 +76,30 @@ if excel_url:
             # Cleaning Data
             df_clean = df_raw.dropna(subset=['Customer', 'Status']).copy()
 
+            # Standarisasi Kolom Remark untuk Kategori Retail vs Goodwill
+            if 'Remark' in df_clean.columns:
+                def categorize_remark(val):
+                    val_str = str(val).strip().upper()
+                    if 'RETAIL' in val_str:
+                        return 'Retail'
+                    elif 'GOODWILL' in val_str:
+                        return 'Goodwill'
+                    else:
+                        return 'Lainnya'
+
+                df_clean['Kategori_Remark'] = df_clean['Remark'].apply(categorize_remark)
+            else:
+                df_clean['Kategori_Remark'] = 'Lainnya'
+
             # Sidebar Filters
             st.sidebar.subheader("🔍 Filter Data")
             
             status_list = sorted(df_clean['Status'].astype(str).unique().tolist())
-            selected_status = st.sidebar.multiselect("Filter Status Unit:", status_list, default=["Active"] if "Active" in status_list else status_list)
+            selected_status = st.sidebar.multiselect(
+                "Filter Status Unit:", 
+                status_list, 
+                default=["Active"] if "Active" in status_list else status_list
+            )
 
             customer_list = sorted(df_clean['Customer'].astype(str).unique().tolist())
             selected_customers = st.sidebar.multiselect("Filter Customer:", customer_list, default=customer_list)
@@ -144,17 +169,25 @@ if excel_url:
                 st.plotly_chart(fig_cust, use_container_width=True)
 
             with col_right:
-                st.subheader("🧩 Komposisi Status Unit")
-                status_counts = filtered_df['Status'].value_counts().reset_index()
-                status_counts.columns = ['Status', 'Total']
+                st.subheader("🧩 Komposisi Tipe (Retail vs Goodwill)")
+                # Mengambil komposisi berdasarkan kategori Retail dan Goodwill
+                type_counts = filtered_df['Kategori_Remark'].value_counts().reset_index()
+                type_counts.columns = ['Tipe', 'Total']
+
+                # Filter khusus agar berfokus pada Retail dan Goodwill
+                type_counts = type_counts[type_counts['Tipe'].isin(['Retail', 'Goodwill'])]
+
+                color_map = {'Retail': '#0068c9', 'Goodwill': '#ff2b2b'}
 
                 fig_status = px.pie(
-                    status_counts,
-                    names='Status',
+                    type_counts,
+                    names='Tipe',
                     values='Total',
                     hole=0.4,
-                    color_discrete_sequence=px.colors.qualitative.Pastel
+                    color='Tipe',
+                    color_discrete_map=color_map
                 )
+                fig_status.update_traces(textposition='inside', textinfo='percent+label+value')
                 st.plotly_chart(fig_status, use_container_width=True)
 
             # 7. Data Table Section
