@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import io
 
@@ -14,9 +15,9 @@ st.set_page_config(
 
 DROPBOX_DEFAULT_URL = "https://www.dropbox.com/scl/fi/j1cak1bp9zgpm7besmlmp/Volvo-Connect-Weekly-Monitor.xlsx?rlkey=lcuvedyrhykl95nh4m21ok2ir&e=1&dl=1"
 
-# 2. Fungsi Load Data
+# 2. Fungsi Load Data dari URL Dropbox
 @st.cache_data(ttl=300)
-def load_data_from_url(url: str):
+def load_all_sheets_from_url(url: str):
     if "dropbox.com" in url and "dl=0" in url:
         url = url.replace("dl=0", "dl=1")
     elif "dropbox.com" in url and "dl=1" not in url:
@@ -27,18 +28,34 @@ def load_data_from_url(url: str):
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=20)
+        response = requests.get(url, headers=headers, timeout=25)
         if response.status_code == 200:
             file_bytes = io.BytesIO(response.content)
-            df = pd.read_excel(file_bytes, sheet_name='List Volvo Connect', header=0)
-            df.columns = df.columns.astype(str).str.strip()
-            return df
+            xls = pd.ExcelFile(file_bytes)
+            
+            # Load sheet List Volvo Connect
+            df_list = pd.read_excel(xls, sheet_name='List Volvo Connect', header=0)
+            df_list.columns = df_list.columns.astype(str).str.strip()
+            
+            # Cari sheet yang mengandung kata 'Growth'
+            growth_sheet_name = None
+            for s in xls.sheet_names:
+                if 'growth' in s.lower():
+                    growth_sheet_name = s
+                    break
+            
+            df_growth = None
+            if growth_sheet_name:
+                df_growth_raw = pd.read_excel(xls, sheet_name=growth_sheet_name)
+                df_growth = df_growth_raw
+                
+            return df_list, df_growth, growth_sheet_name
         else:
             st.error(f"Gagal mengunduh file dari Dropbox. Status Code: {response.status_code}")
-            return None
+            return None, None, None
     except Exception as e:
         st.error(f"Terjadi kesalahan saat memuat data: {e}")
-        return None
+        return None, None, None
 
 # 3. Sidebar Configuration
 st.sidebar.title("⚙️ Sumber Data Cloud")
@@ -47,11 +64,11 @@ st.sidebar.markdown("---")
 
 # 4. Main App Layout
 st.title("🚛 Volvo Connect - Weekly Monitor Dashboard")
-st.markdown("Dashboard monitoring real-time unit aktif, customer aktif, dan rincian fleet.")
+st.markdown("Dashboard monitoring real-time unit aktif, customer aktif, rincian fleet, dan tren pertumbuhan (Growth).")
 
 if excel_url:
     with st.spinner("Mengunduh data terbaru dari Dropbox..."):
-        df_raw = load_data_from_url(excel_url)
+        df_raw, df_growth_raw, growth_sheet_name = load_all_sheets_from_url(excel_url)
 
     if df_raw is not None:
         required_cols = ['Customer', 'Status']
@@ -93,7 +110,6 @@ if excel_url:
             # Sidebar Filters
             st.sidebar.subheader("🔍 Filter Data")
             
-            # Filter Status
             status_list = sorted(df_clean['Status'].astype(str).unique().tolist())
             selected_status = st.sidebar.multiselect(
                 "Filter Status Unit:", 
@@ -101,11 +117,9 @@ if excel_url:
                 default=["Active"] if "Active" in status_list else status_list
             )
 
-            # Filter Customer
             customer_list = sorted(df_clean['Customer'].astype(str).unique().tolist())
             selected_customers = st.sidebar.multiselect("Filter Customer:", customer_list, default=customer_list)
 
-            # Filter Remarks+
             all_remarks = sorted(df_clean['Remarks+'].unique().tolist())
             filtered_remarks_options = [r for r in all_remarks if r != 'Carry Over Subs from 2025 - INACTIVE']
             
@@ -123,13 +137,6 @@ if excel_url:
             ]
 
             # 5. Key Metrics Calculation
-            df_active_overall = df_clean[df_clean['Status'] == 'Active']
-            total_active_units = len(df_active_overall)
-            total_active_customers = df_active_overall['Customer'].nunique()
-
-            # -----------------------------------------------------------------
-            # BARIS 1 KPI (Proporsional 3 Kolom Atas)
-            # -----------------------------------------------------------------
             st.subheader("📊 Key Performance Indicators (KPI)")
             top_col1, top_col2, top_col3 = st.columns(3)
 
@@ -151,9 +158,7 @@ if excel_url:
                     sites_count = filtered_df['Site'].nunique() if 'Site' in filtered_df.columns else 0
                     st.metric(label="📍 Total Site Operational", value=f"{sites_count} Site")
 
-            # -----------------------------------------------------------------
-            # BARIS 2 KPI (Proporsional 3 Kolom Bawah)
-            # -----------------------------------------------------------------
+            # BARIS 2 KPI (Sub-KPI Aktivasi)
             c_carry_active = (filtered_df['Remarks+'] == 'Carry Over Subs from 2025 - Active').sum()
             c_new_act = (filtered_df['Remarks+'] == 'New Activation, of 2026').sum()
             c_renewal = (filtered_df['Remarks+'] == 'Renewal Subs, of 2026').sum()
@@ -172,11 +177,8 @@ if excel_url:
                 with st.container(border=True):
                     st.metric(label="🔄 Renewal Subs (2026)", value=f"{c_renewal} Unit")
 
-            # -----------------------------------------------------------------
             # PERINGATAN EXPIRING UNITS (< 90 HARI)
-            # -----------------------------------------------------------------
             if 'Left_days_num' in filtered_df.columns:
-                # Mengambil unit yang sisa harinya <= 90 dan masih >= 0
                 expiring_df = filtered_df[(filtered_df['Left_days_num'] <= 90) & (filtered_df['Left_days_num'] >= 0)]
                 expiring_units = len(expiring_df)
                 expiring_cust = expiring_df['Customer'].nunique()
@@ -200,7 +202,7 @@ if excel_url:
                         )
 
                 if expiring_units > 0:
-                    with st.expander("📌 Lihat Daftar Unit Akan Habis atau Expiring (< 90 Hari)"):
+                    with st.expander("📌 Lihat Daftar Unit Expiring (< 90 Hari)"):
                         exp_show_cols = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Left days', 'Kategori_Remark'] if c in expiring_df.columns]
                         st.dataframe(
                             expiring_df[exp_show_cols].sort_values(by='Left days'),
@@ -210,7 +212,78 @@ if excel_url:
 
             st.markdown("---")
 
-            # 6. Visualizations Section
+            # -----------------------------------------------------------------
+            # SECTION: WEEKLY GROWTH MONITOR (SHEET GROWTH)
+            # -----------------------------------------------------------------
+            if df_growth_raw is not None:
+                st.subheader(f"📈 Weekly Growth Trend Monitoring ({growth_sheet_name})")
+                
+                try:
+                    # Preprocessing Sheet Growth
+                    # Mencari baris yang berisi header 'Week 1', 'Week 2', dst.
+                    row_idx = None
+                    for idx, row in df_growth_raw.iterrows():
+                        row_vals = row.astype(str).tolist()
+                        if any('Week 1' in v for v in row_vals):
+                            row_idx = idx
+                            break
+                    
+                    if row_idx is not None:
+                        # Extract Header Minggu
+                        weeks_header = df_growth_raw.iloc[row_idx].values
+                        df_g = df_growth_raw.iloc[row_idx+1:].copy()
+                        df_g.columns = weeks_header
+                        
+                        # Ambil kolom deskripsi (kolom ke-1 atau ke-2)
+                        desc_col = df_g.columns[1] if len(df_g.columns) > 1 else df_g.columns[0]
+                        
+                        # Filter baris non-empty
+                        df_g = df_g.dropna(subset=[desc_col])
+                        
+                        # Identifikasi kolom bertipe 'Week X'
+                        week_cols = [c for c in df_g.columns if 'Week' in str(c)]
+                        
+                        if week_cols:
+                            # Melakukan melt data agar cocok untuk Plotly Line Chart
+                            melted_df = df_g.melt(
+                                id_vars=[desc_col], 
+                                value_vars=week_cols,
+                                var_name='Week', 
+                                value_name='Total Unit'
+                            )
+                            melted_df['Total Unit'] = pd.to_numeric(melted_df['Total Unit'], errors='coerce')
+                            melted_df = melted_df.dropna(subset=['Total Unit'])
+                            melted_df.rename(columns={desc_col: 'Kategori'}, inplace=True)
+                            
+                            # Grafik Trend Line Growth
+                            fig_growth = px.line(
+                                melted_df,
+                                x='Week',
+                                y='Total Unit',
+                                color='Kategori',
+                                markers=True,
+                                title="Perkembangan Jumlah Unit Aktif Per Minggu (Weekly Growth)"
+                            )
+                            fig_growth.update_layout(xaxis_title="Minggu (Week)", yaxis_title="Jumlah Unit", hovermode="x unified")
+                            st.plotly_chart(fig_growth, use_container_width=True)
+                            
+                            # Tabel Ringkasan Growth
+                            with st.expander("📋 Lihat Tabel Detail Weekly Growth"):
+                                st.dataframe(df_g, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Format kolom mingguan pada Sheet Growth sedang diproses.")
+                    else:
+                        st.info("Sheet Growth ditemukan. Menampilkan data mentah Sheet Growth:")
+                        st.dataframe(df_growth_raw.head(10), use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Gagal memvisualisasikan Sheet Growth: {e}")
+                    st.dataframe(df_growth_raw.head(10), use_container_width=True)
+            else:
+                st.info("💡 Sheet dengan nama 'Growth' tidak terdeteksi pada file Excel ini.")
+
+            st.markdown("---")
+
+            # 6. Visualizations Section (Top Customer & Pie Chart)
             col_left, col_right = st.columns(2)
 
             with col_left:
@@ -250,7 +323,7 @@ if excel_url:
             st.markdown("---")
 
             # 7. Pivot Summary Table (Jumlah Unit per Customer & Site)
-            st.subheader("📌 Ringkasan Unit Customer aktif berdasarkan Site")
+            st.subheader("📌 Ringkasan Unit Customer berdasarkan Site (Pivot)")
             
             if 'Site' in filtered_df.columns:
                 pivot_df = pd.pivot_table(
