@@ -220,7 +220,7 @@ if excel_url:
             st.markdown("---")
 
             # -----------------------------------------------------------------
-            # SECTION: WEEKLY GROWTH BAR CHART (10 MINGGU TERAKHIR)
+            # SECTION: WEEKLY GROWTH STACKED BAR CHART (10 MINGGU TERAKHIR)
             # -----------------------------------------------------------------
             if df_growth_raw is not None:
                 st.subheader(f"📊 Weekly Growth (10 Minggu Terakhir)")
@@ -234,11 +234,10 @@ if excel_url:
                         last_10_weeks = week_cols[-10:]
 
                         # Extract Seksi 1: Retail/Customer Pay vs Goodwill
-                        df_sec1 = df_growth_raw.iloc[2:4].copy()  # Ambil baris Retail dan Goodwill saja (tanpa Total)
+                        df_sec1 = df_growth_raw.iloc[2:4].copy()
                         df_sec1.columns = headers_row
                         label_col_1 = df_sec1.columns[1]
 
-                        # Melt data 10 minggu terakhir
                         melt1 = df_sec1.melt(
                             id_vars=[label_col_1],
                             value_vars=last_10_weeks,
@@ -249,7 +248,7 @@ if excel_url:
                         melt1['Jumlah Unit'] = pd.to_numeric(melt1['Jumlah Unit'], errors='coerce')
 
                         # Extract Seksi 2: New Activation, Renewal, Carry Over
-                        df_sec2 = df_growth_raw.iloc[9:12].copy()  # Baris 9 s/d 11 (tanpa Total)
+                        df_sec2 = df_growth_raw.iloc[9:12].copy()
                         df_sec2.columns = headers_row
                         label_col_2 = df_sec2.columns[1]
 
@@ -262,8 +261,8 @@ if excel_url:
                         melt2.rename(columns={label_col_2: 'Kategori'}, inplace=True)
                         melt2['Jumlah Unit'] = pd.to_numeric(melt2['Jumlah Unit'], errors='coerce')
 
-                        # Bar Chart Tabs
-                        g_tab1, g_tab2 = st.tabs(["📊 Retail vs Goodwill", "🏷️ Status Subskripsi (New, Renewal, Carry Over)"])
+                        # Tabs Tampilan Overlap / Stacked Bar
+                        g_tab1, g_tab2 = st.tabs(["📊 Retail + Goodwill (Stacked)", "🏷️ Status Subskripsi (Stacked)"])
 
                         with g_tab1:
                             fig_b1 = px.bar(
@@ -271,12 +270,12 @@ if excel_url:
                                 x='Week',
                                 y='Jumlah Unit',
                                 color='Kategori',
-                                barmode='group',
+                                barmode='stack',  # Stacked / Overlap Bar Mode
                                 text_auto=True,
                                 color_discrete_map={'Retail/Customer Pay': '#0068c9', 'Goodwill': '#ff2b2b'},
-                                title="Perbandingan Retail vs Goodwill (10 Minggu Terakhir)"
+                                title="Komposisi Retail + Goodwill Per Minggu (10 Minggu Terakhir)"
                             )
-                            fig_b1.update_layout(xaxis_title="Minggu", yaxis_title="Jumlah Unit")
+                            fig_b1.update_layout(xaxis_title="Minggu", yaxis_title="Total Unit")
                             st.plotly_chart(fig_b1, use_container_width=True)
 
                         with g_tab2:
@@ -285,11 +284,11 @@ if excel_url:
                                 x='Week',
                                 y='Jumlah Unit',
                                 color='Kategori',
-                                barmode='group',
+                                barmode='stack',  # Stacked / Overlap Bar Mode
                                 text_auto=True,
-                                title="Status Subskripsi (10 Minggu Terakhir)"
+                                title="Komposisi Subskripsi Per Minggu (10 Minggu Terakhir)"
                             )
-                            fig_b2.update_layout(xaxis_title="Minggu", yaxis_title="Jumlah Unit")
+                            fig_b2.update_layout(xaxis_title="Minggu", yaxis_title="Total Unit")
                             st.plotly_chart(fig_b2, use_container_width=True)
 
                         with st.expander("📋 Lihat Tabel Data 10 Minggu Terakhir"):
