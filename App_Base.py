@@ -15,7 +15,7 @@ st.set_page_config(
 
 DROPBOX_DEFAULT_URL = "https://www.dropbox.com/scl/fi/j1cak1bp9zgpm7besmlmp/Volvo-Connect-Weekly-Monitor.xlsx?rlkey=lcuvedyrhykl95nh4m21ok2ir&e=1&dl=1"
 
-# 2. Fungsi Load Data Semua Sheet dari Dropbox
+# 2. Fungsi Load Data dari URL Dropbox
 @st.cache_data(ttl=300)
 def load_all_sheets_from_url(url: str):
     if "dropbox.com" in url and "dl=0" in url:
@@ -33,11 +33,11 @@ def load_all_sheets_from_url(url: str):
             file_bytes = io.BytesIO(response.content)
             xls = pd.ExcelFile(file_bytes)
             
-            # Load sheet utama 'List Volvo Connect'
+            # Load sheet List Volvo Connect
             df_list = pd.read_excel(xls, sheet_name='List Volvo Connect', header=0)
             df_list.columns = df_list.columns.astype(str).str.strip()
             
-            # Deteksi sheet 'Growth Week'
+            # Cari sheet yang mengandung kata 'Growth'
             growth_sheet_name = None
             for s in xls.sheet_names:
                 if 'growth' in s.lower():
@@ -46,7 +46,8 @@ def load_all_sheets_from_url(url: str):
             
             df_growth = None
             if growth_sheet_name:
-                df_growth = pd.read_excel(xls, sheet_name=growth_sheet_name)
+                df_growth_raw = pd.read_excel(xls, sheet_name=growth_sheet_name)
+                df_growth = df_growth_raw
                 
             return df_list, df_growth, growth_sheet_name
         else:
@@ -76,7 +77,7 @@ if excel_url:
         if missing_cols:
             st.error(f"⚠️ Kolom berikut tidak ditemukan pada Excel: **{', '.join(missing_cols)}**.")
         else:
-            # Data Cleaning & Preprocessing
+            # Data Cleaning
             df_clean = df_raw.dropna(subset=['Customer', 'Status']).copy()
 
             # Pengelompokan Kategori Remark (Goodwill vs Retail)
@@ -109,7 +110,6 @@ if excel_url:
             # Sidebar Filters
             st.sidebar.subheader("🔍 Filter Data")
             
-            # Filter Status
             status_list = sorted(df_clean['Status'].astype(str).unique().tolist())
             selected_status = st.sidebar.multiselect(
                 "Filter Status Unit:", 
@@ -117,11 +117,9 @@ if excel_url:
                 default=["Active"] if "Active" in status_list else status_list
             )
 
-            # Filter Customer
             customer_list = sorted(df_clean['Customer'].astype(str).unique().tolist())
             selected_customers = st.sidebar.multiselect("Filter Customer:", customer_list, default=customer_list)
 
-            # Filter Remarks+ (Aktivasi)
             all_remarks = sorted(df_clean['Remarks+'].unique().tolist())
             filtered_remarks_options = [r for r in all_remarks if r != 'Carry Over Subs from 2025 - INACTIVE']
             
@@ -135,4 +133,223 @@ if excel_url:
             filtered_df = df_clean[
                 (df_clean['Status'].astype(str).isin(selected_status)) &
                 (df_clean['Customer'].astype(str).isin(selected_customers)) &
-                (df_clean['Remarks+
+                (df_clean['Remarks+'].isin(selected_remarks))
+            ]
+
+            # 5. Key Metrics Calculation
+            st.subheader("📊 Key Performance Indicators (KPI)")
+            top_col1, top_col2, top_col3 = st.columns(3)
+
+            with top_col1:
+                with st.container(border=True):
+                    st.metric(
+                        label="🟢 Total Unit Aktif", 
+                        value=f"{len(filtered_df):,} Unit",
+                        help="Jumlah unit terfilter saat ini"
+                    )
+
+            with top_col2:
+                with st.container(border=True):
+                    cust_filtered_count = filtered_df['Customer'].nunique()
+                    st.metric(label="🏢 Customer Aktif", value=f"{cust_filtered_count} Customer")
+
+            with top_col3:
+                with st.container(border=True):
+                    sites_count = filtered_df['Site'].nunique() if 'Site' in filtered_df.columns else 0
+                    st.metric(label="📍 Total Site Operational", value=f"{sites_count} Site")
+
+            # BARIS 2 KPI (Sub-KPI Aktivasi)
+            c_carry_active = (filtered_df['Remarks+'] == 'Carry Over Subs from 2025 - Active').sum()
+            c_new_act = (filtered_df['Remarks+'] == 'New Activation, of 2026').sum()
+            c_renewal = (filtered_df['Remarks+'] == 'Renewal Subs, of 2026').sum()
+
+            bot_col1, bot_col2, bot_col3 = st.columns(3)
+
+            with bot_col1:
+                with st.container(border=True):
+                    st.metric(label="🟢 Carry Over Subs 2025 (Active)", value=f"{c_carry_active} Unit")
+
+            with bot_col2:
+                with st.container(border=True):
+                    st.metric(label="⚡ New Activation (2026)", value=f"{c_new_act} Unit")
+
+            with bot_col3:
+                with st.container(border=True):
+                    st.metric(label="🔄 Renewal Subs (2026)", value=f"{c_renewal} Unit")
+
+            # PERINGATAN EXPIRING UNITS (< 90 HARI)
+            if 'Left_days_num' in filtered_df.columns:
+                expiring_df = filtered_df[(filtered_df['Left_days_num'] <= 90) & (filtered_df['Left_days_num'] >= 0)]
+                expiring_units = len(expiring_df)
+                expiring_cust = expiring_df['Customer'].nunique()
+
+                st.markdown("##### ⚠️ Warning: Unit Masa Kontrak Segera Habis (< 90 Hari)")
+                exp_col1, exp_col2 = st.columns(2)
+
+                with exp_col1:
+                    with st.container(border=True):
+                        st.metric(
+                            label="⏳ Unit Expiring (< 90 Hari)", 
+                            value=f"{expiring_units} Unit",
+                            help="Jumlah unit terfilter dengan Left days <= 90 hari"
+                        )
+
+                with exp_col2:
+                    with st.container(border=True):
+                        st.metric(
+                            label="🏢 Customer Terdampak (< 90 Hari)", 
+                            value=f"{expiring_cust} Customer"
+                        )
+
+                if expiring_units > 0:
+                    with st.expander("📌 Lihat Daftar Unit Expiring (< 90 Hari)"):
+                        exp_show_cols = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Left days', 'Kategori_Remark'] if c in expiring_df.columns]
+                        st.dataframe(
+                            expiring_df[exp_show_cols].sort_values(by='Left days'),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+
+            st.markdown("---")
+
+            # -----------------------------------------------------------------
+            # SECTION: WEEKLY GROWTH MONITOR (SHEET GROWTH)
+            # -----------------------------------------------------------------
+            if df_growth_raw is not None:
+                st.subheader(f"📈 Weekly Growth Trend Monitoring ({growth_sheet_name})")
+                
+                try:
+                    # Preprocessing Sheet Growth
+                    # Mencari baris yang berisi header 'Week 1', 'Week 2', dst.
+                    row_idx = None
+                    for idx, row in df_growth_raw.iterrows():
+                        row_vals = row.astype(str).tolist()
+                        if any('Week 1' in v for v in row_vals):
+                            row_idx = idx
+                            break
+                    
+                    if row_idx is not None:
+                        # Extract Header Minggu
+                        weeks_header = df_growth_raw.iloc[row_idx].values
+                        df_g = df_growth_raw.iloc[row_idx+1:].copy()
+                        df_g.columns = weeks_header
+                        
+                        # Ambil kolom deskripsi (kolom ke-1 atau ke-2)
+                        desc_col = df_g.columns[1] if len(df_g.columns) > 1 else df_g.columns[0]
+                        
+                        # Filter baris non-empty
+                        df_g = df_g.dropna(subset=[desc_col])
+                        
+                        # Identifikasi kolom bertipe 'Week X'
+                        week_cols = [c for c in df_g.columns if 'Week' in str(c)]
+                        
+                        if week_cols:
+                            # Melakukan melt data agar cocok untuk Plotly Line Chart
+                            melted_df = df_g.melt(
+                                id_vars=[desc_col], 
+                                value_vars=week_cols,
+                                var_name='Week', 
+                                value_name='Total Unit'
+                            )
+                            melted_df['Total Unit'] = pd.to_numeric(melted_df['Total Unit'], errors='coerce')
+                            melted_df = melted_df.dropna(subset=['Total Unit'])
+                            melted_df.rename(columns={desc_col: 'Kategori'}, inplace=True)
+                            
+                            # Grafik Trend Line Growth
+                            fig_growth = px.line(
+                                melted_df,
+                                x='Week',
+                                y='Total Unit',
+                                color='Kategori',
+                                markers=True,
+                                title="Perkembangan Jumlah Unit Aktif Per Minggu (Weekly Growth)"
+                            )
+                            fig_growth.update_layout(xaxis_title="Minggu (Week)", yaxis_title="Jumlah Unit", hovermode="x unified")
+                            st.plotly_chart(fig_growth, use_container_width=True)
+                            
+                            # Tabel Ringkasan Growth
+                            with st.expander("📋 Lihat Tabel Detail Weekly Growth"):
+                                st.dataframe(df_g, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Format kolom mingguan pada Sheet Growth sedang diproses.")
+                    else:
+                        st.info("Sheet Growth ditemukan. Menampilkan data mentah Sheet Growth:")
+                        st.dataframe(df_growth_raw.head(10), use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Gagal memvisualisasikan Sheet Growth: {e}")
+                    st.dataframe(df_growth_raw.head(10), use_container_width=True)
+            else:
+                st.info("💡 Sheet dengan nama 'Growth' tidak terdeteksi pada file Excel ini.")
+
+            st.markdown("---")
+
+            # 6. Visualizations Section (Top Customer & Pie Chart)
+            col_left, col_right = st.columns(2)
+
+            with col_left:
+                st.subheader("📈 Top Customer Berdasarkan Unit")
+                cust_counts = filtered_df['Customer'].value_counts().head(10).reset_index()
+                cust_counts.columns = ['Customer', 'Jumlah Unit']
+                
+                fig_cust = px.bar(
+                    cust_counts,
+                    x='Jumlah Unit',
+                    y='Customer',
+                    orientation='h',
+                    color='Jumlah Unit',
+                    color_continuous_scale='Blues',
+                    text='Jumlah Unit'
+                )
+                fig_cust.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False)
+                st.plotly_chart(fig_cust, use_container_width=True)
+
+            with col_right:
+                st.subheader("🧩 Komposisi Tipe (Retail vs Goodwill)")
+                type_counts = filtered_df['Kategori_Remark'].value_counts().reset_index()
+                type_counts.columns = ['Tipe', 'Total']
+                type_counts = type_counts[type_counts['Tipe'].isin(['Retail', 'Goodwill'])]
+
+                fig_status = px.pie(
+                    type_counts,
+                    names='Tipe',
+                    values='Total',
+                    hole=0.4,
+                    color='Tipe',
+                    color_discrete_map={'Retail': '#0068c9', 'Goodwill': '#ff2b2b'}
+                )
+                fig_status.update_traces(textposition='inside', textinfo='percent+label+value')
+                st.plotly_chart(fig_status, use_container_width=True)
+
+            st.markdown("---")
+
+            # 7. Pivot Summary Table (Jumlah Unit per Customer & Site)
+            st.subheader("📌 Ringkasan Unit Customer berdasarkan Site (Pivot)")
+            
+            if 'Site' in filtered_df.columns:
+                pivot_df = pd.pivot_table(
+                    filtered_df,
+                    index=['Customer', 'Site'],
+                    columns='Kategori_Remark',
+                    values='Chassis ID' if 'Chassis ID' in filtered_df.columns else 'Status',
+                    aggfunc='count',
+                    fill_value=0
+                ).reset_index()
+
+                for col in ['Goodwill', 'Retail']:
+                    if col not in pivot_df.columns:
+                        pivot_df[col] = 0
+
+                pivot_df['Total Unit'] = pivot_df['Goodwill'] + pivot_df['Retail']
+                
+                pivot_display = pivot_df[['Customer', 'Site', 'Goodwill', 'Retail', 'Total Unit']].copy()
+                
+                st.dataframe(
+                    pivot_display,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            # 8. Data Table Detail Section
+            with st.expander("🔍 Lihat Detail Data Mentah"):
+                cols_to_show = [c for c in ['Customer', 'Site', 'Chassis ID', 'Unit Code', 'Truck Type', 'Status', 'Left days', 'Remark', 'Remarks+'] if c in filtered_df.columns]
+                st.dataframe(filtered_df[cols_to_show], use_container_width=True, hide_index=True)
