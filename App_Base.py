@@ -1,7 +1,6 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
-import plotly.graph_objects as go
 import requests
 import io
 
@@ -221,81 +220,84 @@ if excel_url:
             st.markdown("---")
 
             # -----------------------------------------------------------------
-            # SECTION: WEEKLY GROWTH MONITORING (SHEET GROWTH WEEK)
+            # SECTION: WEEKLY GROWTH BAR CHART (10 MINGGU TERAKHIR)
             # -----------------------------------------------------------------
             if df_growth_raw is not None:
-                st.subheader(f"📈 Weekly Growth Trend Monitoring ({growth_sheet_name})")
+                st.subheader(f"📊 Weekly Growth (10 Minggu Terakhir)")
                 
                 try:
-                    # Ambil baris ke-1 sebagai header (Week 1, Week 2, ...)
                     headers_row = df_growth_raw.iloc[1].values
                     week_cols = [str(c) for c in headers_row if 'Week' in str(c)]
 
                     if week_cols:
-                        # Extract Seksi 1: Retail vs Goodwill vs Total (Baris index 2 sampai 4)
-                        df_sec1 = df_growth_raw.iloc[2:5].copy()
+                        # Ambil 10 minggu terbaru
+                        last_10_weeks = week_cols[-10:]
+
+                        # Extract Seksi 1: Retail/Customer Pay vs Goodwill
+                        df_sec1 = df_growth_raw.iloc[2:4].copy()  # Ambil baris Retail dan Goodwill saja (tanpa Total)
                         df_sec1.columns = headers_row
                         label_col_1 = df_sec1.columns[1]
 
-                        # Melt data seksi 1
+                        # Melt data 10 minggu terakhir
                         melt1 = df_sec1.melt(
                             id_vars=[label_col_1],
-                            value_vars=week_cols,
+                            value_vars=last_10_weeks,
                             var_name='Week',
                             value_name='Jumlah Unit'
                         )
                         melt1.rename(columns={label_col_1: 'Kategori'}, inplace=True)
                         melt1['Jumlah Unit'] = pd.to_numeric(melt1['Jumlah Unit'], errors='coerce')
 
-                        # Extract Seksi 2: New, Renewal, Carry Over (Baris index 9 sampai 12)
-                        df_sec2 = df_growth_raw.iloc[9:13].copy()
+                        # Extract Seksi 2: New Activation, Renewal, Carry Over
+                        df_sec2 = df_growth_raw.iloc[9:12].copy()  # Baris 9 s/d 11 (tanpa Total)
                         df_sec2.columns = headers_row
                         label_col_2 = df_sec2.columns[1]
 
-                        # Melt data seksi 2
                         melt2 = df_sec2.melt(
                             id_vars=[label_col_2],
-                            value_vars=week_cols,
+                            value_vars=last_10_weeks,
                             var_name='Week',
                             value_name='Jumlah Unit'
                         )
                         melt2.rename(columns={label_col_2: 'Kategori'}, inplace=True)
                         melt2['Jumlah Unit'] = pd.to_numeric(melt2['Jumlah Unit'], errors='coerce')
 
-                        # Tab Pilihan View Grafik Growth
-                        growth_tab1, growth_tab2 = st.tabs(["📊 Growth berdasarkan Tipe (Retail vs Goodwill)", "🏷️ Growth berdasarkan Status Subskripsi"])
+                        # Bar Chart Tabs
+                        g_tab1, g_tab2 = st.tabs(["📊 Retail vs Goodwill", "🏷️ Status Subskripsi (New, Renewal, Carry Over)"])
 
-                        with growth_tab1:
-                            fig_g1 = px.line(
+                        with g_tab1:
+                            fig_b1 = px.bar(
                                 melt1,
                                 x='Week',
                                 y='Jumlah Unit',
                                 color='Kategori',
-                                markers=True,
-                                title="Weekly Growth: Retail vs Goodwill"
+                                barmode='group',
+                                text_auto=True,
+                                color_discrete_map={'Retail/Customer Pay': '#0068c9', 'Goodwill': '#ff2b2b'},
+                                title="Perbandingan Retail vs Goodwill (10 Minggu Terakhir)"
                             )
-                            fig_g1.update_layout(xaxis_title="Minggu (Week)", yaxis_title="Jumlah Unit", hovermode="x unified")
-                            st.plotly_chart(fig_g1, use_container_width=True)
+                            fig_b1.update_layout(xaxis_title="Minggu", yaxis_title="Jumlah Unit")
+                            st.plotly_chart(fig_b1, use_container_width=True)
 
-                        with growth_tab2:
-                            fig_g2 = px.line(
+                        with g_tab2:
+                            fig_b2 = px.bar(
                                 melt2,
                                 x='Week',
                                 y='Jumlah Unit',
                                 color='Kategori',
-                                markers=True,
-                                title="Weekly Growth: New Activation vs Renewal vs Carry Over"
+                                barmode='group',
+                                text_auto=True,
+                                title="Status Subskripsi (10 Minggu Terakhir)"
                             )
-                            fig_g2.update_layout(xaxis_title="Minggu (Week)", yaxis_title="Jumlah Unit", hovermode="x unified")
-                            st.plotly_chart(fig_g2, use_container_width=True)
+                            fig_b2.update_layout(xaxis_title="Minggu", yaxis_title="Jumlah Unit")
+                            st.plotly_chart(fig_b2, use_container_width=True)
 
-                        with st.expander("📋 Lihat Tabel Detail Sheet Growth"):
-                            st.dataframe(df_growth_raw.dropna(how='all'), use_container_width=True)
+                        with st.expander("📋 Lihat Tabel Data 10 Minggu Terakhir"):
+                            st.dataframe(df_sec1[[label_col_1] + last_10_weeks], use_container_width=True, hide_index=True)
                     else:
                         st.dataframe(df_growth_raw.head(10), use_container_width=True)
                 except Exception as e:
                     st.warning(f"Gagal memproses Sheet Growth: {e}")
-                    st.dataframe(df_growth_raw.head(10), use_container_width=True)
             else:
                 st.info("💡 Sheet dengan nama 'Growth' tidak terdeteksi pada file Excel ini.")
 
